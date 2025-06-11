@@ -1,3 +1,10 @@
+##############################################################################
+## Author: Sebastian Tobias Holdt
+## Copyright: Technical University of Denmark - 2025
+## Comments:
+## This file contains the elf parser andbootloader serial sender running on the sending computer
+##############################################################################
+
 import sys
 import serial
 import serial.tools.list_ports
@@ -8,7 +15,7 @@ startCode = 0x00017373.to_bytes(4, 'little')
 endCode = 0x00027373.to_bytes(4, 'little')
 
 def intToBytes(input):
-  return input.to_bytes(4, 'little')
+  return input.to_bytes(input.bit_length() // 8, 'little')[:4]
 
 def bytesToInt(input):
   return int.from_bytes(input, 'little')
@@ -23,11 +30,15 @@ def getPort():
     return
   return ports[0].device
 
-def isELF(fileArray):
+def isELF32(fileArray):
   magicBytes = bytearray([0x7F, 0x45, 0x4C, 0x46, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
   return fileArray[0:16] == magicBytes
 
-def writeELF(ser, fileArray):
+def isELF64(fileArray):
+  magicBytes = bytearray([0x7F, 0x45, 0x4C, 0x46, 0x02, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+  return fileArray[0:16] == magicBytes
+
+def writeELF32(ser, fileArray):
   entryPoint = bytesToInt(fileArray[24:28])
   secHeadOff = bytesToInt(fileArray[32:36])
   secHeadSize = bytesToInt(fileArray[46:48])
@@ -59,14 +70,50 @@ def writeELF(ser, fileArray):
   print("Starting program at address: 0x{:02X}".format(entryPoint))
   writeEndCode(ser, entryPoint)
 
+def writeELF64(ser, fileArray):
+  entryPoint = bytesToInt(fileArray[24:32])
+  secHeadOff = bytesToInt(fileArray[40:48])
+  secHeadSize = bytesToInt(fileArray[58:60])
+  secHeadNum = bytesToInt(fileArray[60:62])
+  secHeadStrNdx = bytesToInt(fileArray[62:64])
+
+  strSecHeadOff = secHeadOff + secHeadSize*secHeadStrNdx
+  strSec = fileArray[strSecHeadOff : strSecHeadOff + secHeadSize]
+  strSecOff = bytesToInt(strSec[24:32])
+  strSecSize = bytesToInt(strSec[32:40])
+  strTable = fileArray[strSecOff:strSecOff+strSecSize]
+
+  for i in range(secHeadNum):
+    headerOffset = secHeadOff + secHeadSize*i
+    sec = fileArray[headerOffset : headerOffset + secHeadSize]
+    nameIndex = bytesToInt(sec[0:4])
+    secType = bytesToInt(sec[4:8])
+    addr = bytesToInt(sec[16:24])
+    secOffset = bytesToInt(sec[24:32])
+    secSize = bytesToInt(sec[32:40])
+    name = strTable[nameIndex:].split(b'\x00')[0].decode('ascii')
+    if (secType == 1 and name != ".comment"):
+      content = fileArray[secOffset : secOffset + secSize]
+      print("Writing segment: " + name + " at addresses 0x{:02X}".format(addr) + "-0x{:02X}".format(addr + len(content)))
+      writeBinary(ser, content, addr)
+  
+  print("Starting program at address: 0x{:02X}".format(entryPoint))
+  writeEndCode(ser, entryPoint)
+  
+
 def writeBinary(ser, binary, wrPtr = 0):
-  ser.write(startCode)
-  ser.write(intToBytes(wrPtr))
-  ser.write(binary)
+  transmit(ser, startCode)
+  transmit(ser, intToBytes(wrPtr))
+  transmit(ser, binary)
 
 def writeEndCode(ser, startAddr = 0):
-  ser.write(endCode)
-  ser.write(intToBytes(startAddr))
+  transmit(ser, endCode)
+  transmit(ser, intToBytes(startAddr))
+
+def transmit(ser, buffer):
+  for i in range(len(buffer)):
+    print(buffer[i:i+1])
+    ser.write(buffer[i:i+1])
 
 with open(readFile, "rb") as file:
   fileArray = file.read()
@@ -76,11 +123,12 @@ with open(readFile, "rb") as file:
   except:
     print("Unable to open Serial Port")
     quit()
-  # Clear Memory:
-  # writeBinary(ser, b'\x00'*0x8000, 0)
-  if (isELF(fileArray)):
-    writeELF(ser, fileArray)
+  if (isELF32(fileArray)):
+    writeELF32(ser, fileArray)
+  elif (isELF64(fileArray)):
+    writeELF64(ser, fileArray)
   else:
+    print("Writing file as binary with entry point 0x0")
     writeBinary(ser, fileArray)
     writeEndCode(ser)
   ser.close()
