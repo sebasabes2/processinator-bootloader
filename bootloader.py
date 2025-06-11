@@ -111,9 +111,7 @@ def writeEndCode(ser, startAddr = 0):
   transmit(ser, intToBytes(startAddr))
 
 def transmit(ser, buffer):
-  for i in range(len(buffer)):
-    print(buffer[i:i+1])
-    ser.write(buffer[i:i+1])
+  ser.write(buffer)
 
 with open(readFile, "rb") as file:
   fileArray = file.read()
