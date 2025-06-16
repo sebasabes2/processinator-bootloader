@@ -10,9 +10,15 @@
 
 #define START_CODE (0x00017373U)
 #define END_CODE (0x00027373U)
+#define ZERO_CODE (0x00037373U)
+
+struct ZeroSection {
+  uint8_t *startPointer;
+  uint64_t size; 
+};
 
 void configUART();
-unsigned char receiveChar();
+uint8_t receiveChar();
 void writeLEDs(int bits);
 void jumpToAddress(void *);
 
@@ -24,7 +30,17 @@ uint32_t nextWord() {
   return word;
 }
 
+void writeByte(uint8_t *writePointer, uint8_t byte) {
+  *writePointer = byte;
+}
+
+void writeDoubleWord(uint64_t *writePointer, uint64_t doubleWord) {
+  *writePointer = doubleWord;
+}
+
 void main() {
+  struct ZeroSection zeroSections[256];
+  int zeroI = 0;
   configUART();
   // Turn on LED to indicate bootloader state
   writeLEDs(1);
@@ -35,16 +51,37 @@ void main() {
   }
   // Write segments
   while (code != END_CODE) {
-    unsigned char *writePointer = (unsigned char *)(uint64_t) nextWord();
-    code = nextWord();
-    while (code != START_CODE && code != END_CODE) {
-      *writePointer = (unsigned char) (code & 0xff);
-      writePointer ++;
-      code = (receiveChar() << 24) + (code >> 8);
+    if (code == START_CODE) {
+      uint8_t *writePointer = (uint8_t *)(uint64_t) nextWord();
+      code = nextWord();
+      while (code != START_CODE && code != END_CODE && code != ZERO_CODE) {
+        writeByte(writePointer, (uint8_t) (code & 0xff));
+        writePointer ++;
+        code = (receiveChar() << 24) + (code >> 8);
+      }
+    }
+    if (code == ZERO_CODE) {
+      zeroSections[zeroI].startPointer = (uint8_t *)(uint64_t) nextWord();
+      zeroSections[zeroI].size = (uint64_t) nextWord();
+      zeroI++;
     }
   }
   // Get entry point
   uint64_t entryPoint = nextWord();
+  // ZeroSections
+  while (zeroI != 0) {
+    zeroI--;
+    uint64_t *writePointer = zeroSections[zeroI].startPointer;
+    uint64_t *endPointer = zeroSections[zeroI].startPointer + zeroSections[zeroI].size;
+    while (writePointer + 7 < endPointer) {
+      writeDoubleWord(writePointer, 0);
+      writePointer += 8;
+    }
+    while (writePointer < endPointer) {
+      writeByte(writePointer, 0);
+      writePointer++;
+    }
+  }
   // Turn off LEDs
   writeLEDs(0);
   // Jump to entry point

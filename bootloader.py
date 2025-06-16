@@ -6,6 +6,7 @@
 ##############################################################################
 
 import sys
+import time
 import serial
 import serial.tools.list_ports
 
@@ -15,7 +16,11 @@ startCode = 0x00017373.to_bytes(4, 'little')
 endCode = 0x00027373.to_bytes(4, 'little')
 
 def intToBytes(input):
-  return input.to_bytes(input.bit_length() // 8, 'little')[:4]
+  # intSize = input.bit_length() > 32
+  # return input.to_bytes(input.bit_length() // 8, 'little')[:4]
+  # bytes = input.to_bytes(4, 'little')
+  # print(bytes)
+  return input.to_bytes(4, 'little')
 
 def bytesToInt(input):
   return int.from_bytes(input, 'little')
@@ -60,7 +65,7 @@ def writeELF32(ser, fileArray):
     secOffset = bytesToInt(sec[16:20])
     secSize = bytesToInt(sec[20:24])
     name = strTable[nameIndex:].split(b'\x00')[0].decode('ascii')
-    if (secType == 1 and name != ".comment"): # If type == SHT_PROGBITS. Addr != 0 should be changed to something smarter, but this is to avoid comments. UPDATE: it has been changed to check .comment name. more sections or smarter solution might be needed in the future. 
+    if (secType == 1 and ".comment" not in name and ".debug" not in name): # If type == SHT_PROGBITS. Addr != 0 should be changed to something smarter, but this is to avoid comments. UPDATE: it has been changed to check .comment name. more sections or smarter solution might be needed in the future. 
       content = fileArray[secOffset : secOffset + secSize]
       missingBytes = (-len(content)) % 4
       content += bytes(b'\x00'*missingBytes)
@@ -92,10 +97,15 @@ def writeELF64(ser, fileArray):
     secOffset = bytesToInt(sec[24:32])
     secSize = bytesToInt(sec[32:40])
     name = strTable[nameIndex:].split(b'\x00')[0].decode('ascii')
-    if (secType == 1 and name != ".comment"):
+    # print(name, secType)  
+    if (secType == 1 and ".comment" not in name and ".debug" not in name):
       content = fileArray[secOffset : secOffset + secSize]
       print("Writing segment: " + name + " at addresses 0x{:02X}".format(addr) + "-0x{:02X}".format(addr + len(content)))
       writeBinary(ser, content, addr)
+    if (secType == 8 and ".work" not in name):
+      print("Zeroing segment: " + name + " at addresses 0x{:02X}".format(addr) + "-0x{:02X}".format(addr + secSize))
+      writeBinary(ser, b'\x00'*secSize, addr)
+      # print(len(b'\x00'*secSize))
   
   print("Starting program at address: 0x{:02X}".format(entryPoint))
   writeEndCode(ser, entryPoint)
@@ -117,7 +127,7 @@ with open(readFile, "rb") as file:
   fileArray = file.read()
   port = getPort()
   try:
-    ser = serial.Serial(port, 115200)
+    ser = serial.Serial(port, 115200, timeout=3)
   except:
     print("Unable to open Serial Port")
     quit()
@@ -129,4 +139,6 @@ with open(readFile, "rb") as file:
     print("Writing file as binary with entry point 0x0")
     writeBinary(ser, fileArray)
     writeEndCode(ser)
+  # while True:
+    # print(chr(ser.read()[0]), end="", flush=True)
   ser.close()
