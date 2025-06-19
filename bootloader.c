@@ -13,7 +13,7 @@
 #define ZERO_CODE (0x00037373U)
 
 struct ZeroSection {
-  uint8_t *startPointer;
+  void *startPointer;
   uint64_t size; 
 };
 
@@ -30,16 +30,16 @@ uint32_t nextWord() {
   return word;
 }
 
-void writeByte(uint8_t *writePointer, uint8_t byte) {
+void writeByte(volatile uint8_t *writePointer, uint8_t byte) {
   *writePointer = byte;
 }
 
-void writeDoubleWord(uint64_t *writePointer, uint64_t doubleWord) {
+void writeDoubleWord(volatile uint64_t *writePointer, uint64_t doubleWord) {
   *writePointer = doubleWord;
 }
 
 void main() {
-  struct ZeroSection zeroSections[256];
+  struct ZeroSection zeroSections[32];
   int zeroI = 0;
   configUART();
   // Turn on LED to indicate bootloader state
@@ -64,6 +64,7 @@ void main() {
       zeroSections[zeroI].startPointer = (uint8_t *)(uint64_t) nextWord();
       zeroSections[zeroI].size = (uint64_t) nextWord();
       zeroI++;
+      code = nextWord();
     }
   }
   // Get entry point
@@ -71,8 +72,8 @@ void main() {
   // ZeroSections
   while (zeroI != 0) {
     zeroI--;
-    uint64_t *writePointer = zeroSections[zeroI].startPointer;
-    uint64_t *endPointer = zeroSections[zeroI].startPointer + zeroSections[zeroI].size;
+    void *writePointer = zeroSections[zeroI].startPointer;
+    void *endPointer = zeroSections[zeroI].startPointer + zeroSections[zeroI].size;
     while (writePointer + 7 < endPointer) {
       writeDoubleWord(writePointer, 0);
       writePointer += 8;

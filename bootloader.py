@@ -14,12 +14,9 @@ readFile = sys.argv[1]
 
 startCode = 0x00017373.to_bytes(4, 'little')
 endCode = 0x00027373.to_bytes(4, 'little')
+zeroCode = 0x00037373.to_bytes(4, 'little')
 
 def intToBytes(input):
-  # intSize = input.bit_length() > 32
-  # return input.to_bytes(input.bit_length() // 8, 'little')[:4]
-  # bytes = input.to_bytes(4, 'little')
-  # print(bytes)
   return input.to_bytes(4, 'little')
 
 def bytesToInt(input):
@@ -88,6 +85,8 @@ def writeELF64(ser, fileArray):
   strSecSize = bytesToInt(strSec[32:40])
   strTable = fileArray[strSecOff:strSecOff+strSecSize]
 
+  skippedSections = []
+
   for i in range(secHeadNum):
     headerOffset = secHeadOff + secHeadSize*i
     sec = fileArray[headerOffset : headerOffset + secHeadSize]
@@ -97,19 +96,20 @@ def writeELF64(ser, fileArray):
     secOffset = bytesToInt(sec[24:32])
     secSize = bytesToInt(sec[32:40])
     name = strTable[nameIndex:].split(b'\x00')[0].decode('ascii')
-    # print(name, secType)  
     if (secType == 1 and ".comment" not in name and ".debug" not in name):
       content = fileArray[secOffset : secOffset + secSize]
       print("Writing segment: " + name + " at addresses 0x{:02X}".format(addr) + "-0x{:02X}".format(addr + len(content)))
       writeBinary(ser, content, addr)
-    if (secType == 8 and ".work" not in name):
+    elif (secType == 8):
       print("Zeroing segment: " + name + " at addresses 0x{:02X}".format(addr) + "-0x{:02X}".format(addr + secSize))
-      writeBinary(ser, b'\x00'*secSize, addr)
-      # print(len(b'\x00'*secSize))
+      writeZeroSection(ser, addr, secSize)
+    elif (secType != 0 and secType != 2 and secType != 3):
+      skippedSections.append(name + "(0x{:X})".format(secType))
   
+  print("Skipped sections:", " ".join(skippedSections))
+
   print("Starting program at address: 0x{:02X}".format(entryPoint))
   writeEndCode(ser, entryPoint)
-  
 
 def writeBinary(ser, binary, wrPtr = 0):
   transmit(ser, startCode)
@@ -119,6 +119,11 @@ def writeBinary(ser, binary, wrPtr = 0):
 def writeEndCode(ser, startAddr = 0):
   transmit(ser, endCode)
   transmit(ser, intToBytes(startAddr))
+
+def writeZeroSection(ser, startPtr, length):
+  transmit(ser, zeroCode)
+  transmit(ser, intToBytes(startPtr))
+  transmit(ser, intToBytes(length))
 
 def transmit(ser, buffer):
   ser.write(buffer)
@@ -139,6 +144,4 @@ with open(readFile, "rb") as file:
     print("Writing file as binary with entry point 0x0")
     writeBinary(ser, fileArray)
     writeEndCode(ser)
-  # while True:
-    # print(chr(ser.read()[0]), end="", flush=True)
   ser.close()
